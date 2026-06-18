@@ -1,0 +1,117 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ---- WAVE design tokens ---- */
+
+:root {
+  /* Base */
+  --color-bg:               #0A0A0A;
+  --color-surface:          #111111;
+  --color-surface-elevated: #1A1A1A;
+  --color-border:           #2A2A2A;
+  --color-border-subtle:    #1E1E1E;
+
+  /* Text */
+  --color-text-primary:   #FAFAFA;
+  --color-text-secondary: #888888;
+  --color-text-tertiary:  #555555;
+
+  /* Brand */
+  --color-brand:     #F7931A;
+  --color-brand-dim: rgba(247, 147, 26, 0.1);
+
+  /* Semantic */
+  --color-success: #22C55E;
+  --color-danger:  #EF4444;
+  --color-warning: #EAB308;
+
+  /* Era accent colors */
+  --color-era-stx:  #3B82F6;
+  --color-era-sbtc: #F7931A;
+  --color-era-alex: #8B5CF6;
+
+  /* Border radii */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm:    0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md:    0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-brand: 0 0 24px rgba(247, 147, 26, 0.15);
+
+  /* Typography stacks */
+  --font-display: 'Cal Sans', 'Geist', system-ui, sans-serif;
+  --font-body:    'Inter', 'Geist Sans', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* shadcn CSS variable bridge — maps shadcn tokens to WAVE tokens */
+  --background:        var(--color-bg);
+  --foreground:        var(--color-text-primary);
+  --card:              var(--color-surface);
+  --card-foreground:   var(--color-text-primary);
+  --popover:           var(--color-surface-elevated);
+  --popover-foreground: var(--color-text-primary);
+  --primary:           var(--color-brand);
+  --primary-foreground: #0A0A0A;
+  --secondary:         var(--color-surface-elevated);
+  --secondary-foreground: var(--color-text-primary);
+  --muted:             var(--color-surface);
+  --muted-foreground:  var(--color-text-secondary);
+  --accent:            var(--color-surface-elevated);
+  --accent-foreground: var(--color-text-primary);
+  --destructive:       var(--color-danger);
+  --border:            var(--color-border);
+  --input:             var(--color-surface-elevated);
+  --ring:              var(--color-brand);
+
+  /* Radius token for shadcn */
+  --radius: var(--radius-md);
+}
+
+@theme inline {
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text-primary);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+/* ---- Global base styles ---- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scores, balances, addresses — always mono with tabular nums */
+.mono,
+[data-mono] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reduced motion — respect user preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

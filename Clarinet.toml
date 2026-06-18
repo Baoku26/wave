@@ -1,0 +1,25 @@
+[project]
+name = "wave"
+description = "WAVE — Onchain Chart Surfing Game on Stacks"
+authors = []
+telemetry = false
+cache_dir = "./.cache"
+
+[contracts.wave-token]
+path = "contracts/wave-token.clar"
+epoch = "3.1"
+clarity_version = 3
+
+[contracts.wave-nft]
+path = "contracts/wave-nft.clar"
+epoch = "3.1"
+clarity_version = 3
+
+[contracts.wave-game]
+path = "contracts/wave-game.clar"
+epoch = "3.1"
+clarity_version = 3
+
+[repl.analysis]
+passes = ["check_checker"]
+check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }

@@ -1,0 +1,31 @@
+id: 0
+name: Testnet deployment
+network: testnet
+stacks-node: https://api.testnet.hiro.so
+bitcoin-node: http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332
+plan:
+  batches:
+  - id: 0
+    transactions:
+    - transaction-type: contract-publish
+      contract-name: wave-nft
+      expected-sender: ST3ZVYXZWTR3Y7XNCK7RAM2KD4G77SKNBW6T4YH2W
+      cost: 23840
+      path: contracts/wave-nft.clar
+      anchor-block-only: true
+      clarity-version: 3
+    - transaction-type: contract-publish
+      contract-name: wave-token
+      expected-sender: ST3ZVYXZWTR3Y7XNCK7RAM2KD4G77SKNBW6T4YH2W
+      cost: 25440
+      path: contracts/wave-token.clar
+      anchor-block-only: true
+      clarity-version: 3
+    - transaction-type: contract-publish
+      contract-name: wave-game
+      expected-sender: ST3ZVYXZWTR3Y7XNCK7RAM2KD4G77SKNBW6T4YH2W
+      cost: 96790
+      path: contracts/wave-game.clar
+      anchor-block-only: true
+      clarity-version: 3
+    epoch: '3.1'
