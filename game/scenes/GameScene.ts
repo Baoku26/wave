@@ -13,10 +13,15 @@ import {
   CAMERA_LERP_X,
   CAMERA_OFFSET_X,
   TERRAIN_THICKNESS,
+  TERRAIN_MIN_Y_RATIO,
   COLORS,
 } from '../constants';
 
-const SURFER_START_X       = 120;
+// Pre-terrain runway: surfer spawns on a flat platform before the chart starts.
+// RUNWAY_WIDTH must be at least CAMERA_OFFSET_X wide so the camera doesn't
+// overshoot into negative space past the runway on startup.
+const RUNWAY_WIDTH          = SEGMENT_WIDTH * 4;    // 320 px
+const SURFER_START_X        = -(RUNWAY_WIDTH / 2);  // -160 px — centre of runway
 const SURFER_START_Y_OFFSET = -30;
 const MILESTONE_STEP        = 5000;
 
@@ -51,6 +56,10 @@ export class GameScene extends Phaser.Scene {
     this.cursors  = this.input.keyboard!.createCursorKeys();
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
+    // off-before-on: prevents duplicate listeners if Phaser restarts this scene
+    // without a full shutdown cycle (e.g. rapid navigation before RAF destroy fires).
+    EventBus.off('start-run', this.startRun,    this);
+    EventBus.off('wipeout',   this.handleWipeout, this);
     EventBus.on('start-run', this.startRun,    this);
     EventBus.on('wipeout',   this.handleWipeout, this);
 
@@ -151,8 +160,15 @@ export class GameScene extends Phaser.Scene {
     this.surfer.create(SURFER_START_X, startY + SURFER_START_Y_OFFSET);
 
     this.buildTerrainPhysics();
-    this.cameras.main.scrollX = 0;
-    this.cameras.main.setBounds(0, 0, this.terrain.totalWidth + CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Place camera so the surfer appears at CAMERA_OFFSET_X from the left edge.
+    this.cameras.main.scrollX = SURFER_START_X - CAMERA_OFFSET_X;
+    this.cameras.main.setBounds(
+      -(RUNWAY_WIDTH + CAMERA_OFFSET_X),
+      0,
+      this.terrain.totalWidth + CANVAS_WIDTH + RUNWAY_WIDTH + CAMERA_OFFSET_X,
+      CANVAS_HEIGHT,
+    );
   }
 
   private buildTerrainPhysics() {
@@ -163,6 +179,8 @@ export class GameScene extends Phaser.Scene {
     }
     if (pts.length > 0) {
       const last = pts[pts.length - 1];
+      const totalW = this.terrain.totalWidth;
+
       const floor = this.matter.add.rectangle(
         last.x + CANVAS_WIDTH / 2,
         CANVAS_HEIGHT + TERRAIN_THICKNESS / 2,
@@ -171,6 +189,30 @@ export class GameScene extends Phaser.Scene {
         { isStatic: true, label: 'terrain-floor', friction: 0.8 },
       );
       this.terrainBodies.push(floor as unknown as MatterJS.BodyType);
+
+      // Hard ceiling at the top chart line — prevents the surfer from jumping
+      // above the visible terrain band regardless of chart shape.
+      const ceilingY = CANVAS_HEIGHT * TERRAIN_MIN_Y_RATIO - TERRAIN_THICKNESS / 2;
+      const ceiling = this.matter.add.rectangle(
+        totalW / 2,
+        ceilingY,
+        totalW + CANVAS_WIDTH + RUNWAY_WIDTH + CAMERA_OFFSET_X,
+        TERRAIN_THICKNESS,
+        { isStatic: true, label: 'terrain-ceiling', friction: 0, restitution: 0 },
+      );
+      this.terrainBodies.push(ceiling as unknown as MatterJS.BodyType);
+
+      // Flat runway before the chart — surfer spawns here and rides into the terrain.
+      // Level is locked to the first terrain point so the transition is seamless.
+      const platformY = pts[0].y;
+      const platform = this.matter.add.rectangle(
+        -(RUNWAY_WIDTH / 2),
+        platformY + TERRAIN_THICKNESS / 2,
+        RUNWAY_WIDTH + SEGMENT_WIDTH, // small right-side overlap with terrain start
+        TERRAIN_THICKNESS,
+        { isStatic: true, label: 'terrain-platform', friction: 0.8, restitution: 0 },
+      );
+      this.terrainBodies.push(platform as unknown as MatterJS.BodyType);
     }
   }
 

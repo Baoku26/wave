@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { EventBus } from '@/game/EventBus';
 import type { OHLCCandle, RunCompletePayload, ScoreUpdatePayload, TrickEvent } from '@/game/index';
 
 interface GameCanvasProps {
@@ -34,7 +35,7 @@ export function GameCanvas({
 
     let mounted = true;
 
-    import('@/game/index').then(({ createGame, EventBus }) => {
+    import('@/game/index').then(({ createGame }) => {
       if (!mounted || !containerRef.current) return;
 
       const game = createGame(containerRef.current);
@@ -68,6 +69,13 @@ export function GameCanvas({
 
     return () => {
       mounted = false;
+      // Eagerly remove game-scene listeners before the async game.destroy(true).
+      // game.destroy queues shutdown for the next RAF frame, so GameScene.shutdown()
+      // (which calls EventBus.off) won't run until the next frame. If a new game
+      // starts in the same frame, its game-scene-ready fires and the stale
+      // start-run listener from the old scene reaches a half-destroyed surfer.
+      EventBus.removeAllListeners('start-run');
+      EventBus.removeAllListeners('wipeout');
       cleanupRef.current?.();
       cleanupRef.current = null;
       if (gameRef.current) {

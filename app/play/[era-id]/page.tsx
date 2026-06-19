@@ -3,16 +3,31 @@
 import { use, useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useStacksWallet } from '@baoku26/sbtc-sdk';
 import { GameCanvas } from '@/components/game/GameCanvas';
 import { HUD } from '@/components/game/HUD';
 import { PostRunScreen } from '@/components/game/PostRunScreen';
+import { useWaveBalance } from '@/hooks/useWaveBalance';
+import { useStartRun } from '@/hooks/useStartRun';
+import { useSubmitScore } from '@/hooks/useSubmitScore';
 import type { OHLCCandle, RunCompletePayload, ScoreUpdatePayload, TrickEvent } from '@/game/index';
 import { ERAS, type EraId } from '@/lib/eras';
+
+const START_RUN_COST = BigInt(50); // WAVE tokens
 
 export default function GamePage({ params }: { params: Promise<{ 'era-id': string }> }) {
   const { 'era-id': rawEraId } = use(params);
   const eraId = rawEraId as EraId;
   const era   = ERAS[eraId] ?? ERAS['stx-bull-2021'];
+
+  // ── wallet ───────────────────────────────────────────────────────────────────
+  const { address, publicKey, isLoaded } = useStacksWallet();
+  const { raw: waveBalance, refetch: refetchBalance } = useWaveBalance();
+  const { startRun, isLoading: isStarting, error: startError, runId } = useStartRun();
+  const { submitScore, isLoading: isSubmitting, error: submitError } = useSubmitScore();
+
+  const hasWallet       = isLoaded && !!address;
+  const hasSufficientWave = waveBalance !== null && waveBalance >= START_RUN_COST;
 
   // ── chart data ──────────────────────────────────────────────────────────────
   const [candles, setCandles]       = useState<OHLCCandle[] | null>(null);
@@ -25,13 +40,22 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
       .catch(() => setFetchError(true));
   }, [eraId]);
 
-  // ── game state ───────────────────────────────────────────────────────────────
+  // ── game flow ────────────────────────────────────────────────────────────────
+  const [gameStarted,  setGameStarted]  = useState(false);
+  const [onchainMode,  setOnchainMode]  = useState(false);
+  const activeRunId    = useRef<Uint8Array | null>(null);
+
   const [score,           setScore]           = useState(0);
   const [multiplier,      setMultiplier]      = useState(1);
   const [distanceCandles, setDistanceCandles] = useState(0);
   const [trickFlash,      setTrickFlash]      = useState<string | null>(null);
   const [runResult,       setRunResult]       = useState<RunCompletePayload | null>(null);
   const trickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── submit state ─────────────────────────────────────────────────────────────
+  const [submitPhase, setSubmitPhase] = useState<'idle' | 'signing' | 'confirming' | 'done'>('idle');
+  const [waveEarned,  setWaveEarned]  = useState<bigint | null>(null);
+  const [onchainTxid, setOnchainTxid] = useState<string | null>(null);
 
   const handleScoreUpdate = useCallback((u: ScoreUpdatePayload) => {
     setScore(u.score);
@@ -45,11 +69,54 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
     trickTimer.current = setTimeout(() => setTrickFlash(null), 1200);
   }, []);
 
-  const handleRunComplete = useCallback((r: RunCompletePayload) => {
-    setRunResult(r);
-  }, []);
+  const handleRunComplete = useCallback(async (r: RunCompletePayload) => {
+    if (onchainMode && activeRunId.current) {
+      setSubmitPhase('signing');
+      const result = await submitScore(activeRunId.current, r.score, r.tricks);
+      if (result) {
+        setSubmitPhase('confirming');
+        setOnchainTxid(result.txid);
+        setWaveEarned(result.waveEarned);
+        refetchBalance();
+        // Give the tx a moment to broadcast before showing the result screen
+        setTimeout(() => { setSubmitPhase('done'); setRunResult(r); }, 1200);
+      } else {
+        // Submission failed — still show results in demo mode
+        setSubmitPhase('idle');
+        setRunResult(r);
+      }
+    } else {
+      setRunResult(r);
+    }
+  }, [onchainMode, submitScore, refetchBalance]);
 
   const handlePlayAgain = useCallback(() => window.location.reload(), []);
+
+  // ── launch handlers ──────────────────────────────────────────────────────────
+  const handlePlayFree = useCallback(() => {
+    setOnchainMode(false);
+    activeRunId.current = null;
+    setGameStarted(true);
+  }, []);
+
+  const handleStartOnchain = useCallback(async () => {
+    if (!address || !publicKey) return;
+    setOnchainMode(true);
+    const res = await startRun(era.token, eraId);
+    if (res) {
+      activeRunId.current = res.runId;
+      setGameStarted(true);
+    } else {
+      setOnchainMode(false);
+    }
+  }, [address, publicKey, startRun, era.token, eraId]);
+
+  // ── submit overlay text ───────────────────────────────────────────────────────
+  const submitStatusText = (() => {
+    if (submitPhase === 'signing')    return 'Signing score…';
+    if (submitPhase === 'confirming') return 'Confirming on Bitcoin via Stacks (~10s)…';
+    return null;
+  })();
 
   // ── render ───────────────────────────────────────────────────────────────────
   return (
@@ -69,11 +136,23 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
           </span>
           <span className="text-[#fafafa] text-sm font-medium">{era.name}</span>
         </div>
-        <span className="text-[#333] text-xs tabular-nums">
-          {new Date(era.from * 1000).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-          {' – '}
-          {new Date(era.to   * 1000).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-        </span>
+        {/* Wallet status */}
+        <div className="flex items-center gap-3">
+          {hasWallet ? (
+            <>
+              <span className="text-[#f7931a] text-xs tabular-nums font-medium">
+                {waveBalance?.toLocaleString() ?? '—'} WAVE
+              </span>
+              <span className="text-[#2a2a2a] text-[10px] font-mono hidden sm:block">
+                {address!.slice(0, 6)}…{address!.slice(-4)}
+              </span>
+            </>
+          ) : (
+            <Link href="/faucet" className="text-[#444] hover:text-[#666] text-xs transition-colors">
+              No wallet
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Game area */}
@@ -82,21 +161,121 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
 
           {candles ? (
             <>
-              <HUD
-                score={score}
-                multiplier={multiplier}
-                distanceCandles={distanceCandles}
-                totalCandles={candles.length}
-                eraName={era.name}
-                token={era.token}
-                accentColor={era.accentColor}
-                trickFlash={trickFlash}
-              />
+              {/* HUD — visible once game starts */}
+              {gameStarted && (
+                <HUD
+                  score={score}
+                  multiplier={multiplier}
+                  distanceCandles={distanceCandles}
+                  totalCandles={candles.length}
+                  eraName={era.name}
+                  token={era.token}
+                  accentColor={era.accentColor}
+                  trickFlash={trickFlash}
+                />
+              )}
+
+              {/* Score-submit overlay */}
+              <AnimatePresence>
+                {submitStatusText && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 z-20 flex items-center justify-center bg-[#0a0a0a]/80 rounded-xl"
+                  >
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-5 h-5 border-2 border-[#f7931a] border-t-transparent rounded-full animate-spin" />
+                      <p className="text-[#888] text-sm">{submitStatusText}</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Launch card — shown before game starts */}
+              <AnimatePresence>
+                {!gameStarted && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, scale: 0.96 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0a0a]/90 rounded-xl"
+                  >
+                    <motion.div
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.05, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                      className="bg-[#111] border border-[#1e1e1e] rounded-2xl p-8 w-full max-w-xs mx-4 flex flex-col gap-5"
+                    >
+                      <div>
+                        <p className="text-[#fafafa] text-base font-semibold mb-1">{era.name}</p>
+                        <p className="text-[#444] text-xs">
+                          {era.token} ·{' '}
+                          {new Date(era.from * 1000).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+
+                      {startError && (
+                        <p className="text-[#ef4444] text-xs">{startError}</p>
+                      )}
+
+                      {/* Onchain run button */}
+                      {hasWallet && (
+                        <div className="space-y-2">
+                          <button
+                            onClick={handleStartOnchain}
+                            disabled={!hasSufficientWave || isStarting}
+                            className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            style={{ background: era.accentColor, color: '#0a0a0a' }}
+                          >
+                            {isStarting
+                              ? 'Confirming on Stacks…'
+                              : `Start Run · 50 WAVE`}
+                          </button>
+                          {isStarting && (
+                            <p className="text-[#333] text-[10px] text-center">
+                              ~10s · confirming on Bitcoin via Stacks
+                            </p>
+                          )}
+                          {!hasSufficientWave && !isStarting && (
+                            <p className="text-[#444] text-[10px] text-center">
+                              Need 50 WAVE ·{' '}
+                              <Link href="/faucet" className="text-[#666] underline underline-offset-2 hover:text-[#888]">
+                                get WAVE
+                              </Link>
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Free play button */}
+                      <button
+                        onClick={handlePlayFree}
+                        className="w-full py-2.5 rounded-xl text-sm border border-[#2a2a2a] text-[#666] hover:border-[#3a3a3a] hover:text-[#888] transition-colors"
+                      >
+                        {hasWallet ? 'Play Free (no score)' : 'Play Free'}
+                      </button>
+
+                      {!hasWallet && isLoaded && (
+                        <p className="text-[#333] text-[10px] text-center">
+                          <Link href="/faucet" className="text-[#444] underline underline-offset-2 hover:text-[#666]">
+                            Get a wallet + WAVE
+                          </Link>{' '}
+                          to record scores on-chain
+                        </p>
+                      )}
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Phaser canvas — always mounted once candles are ready so it preloads */}
               <GameCanvas
                 eraId={eraId}
                 token={era.token}
                 candles={candles}
-                playerAddress="demo"
+                playerAddress={address ?? 'demo'}
                 onRunComplete={handleRunComplete}
                 onScoreUpdate={handleScoreUpdate}
                 onTrickLanded={handleTrickLanded}
@@ -126,7 +305,7 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
         </div>
 
         {/* Controls hint */}
-        {!runResult && candles && (
+        {gameStarted && !runResult && (
           <div className="flex items-center gap-6 text-[#333] text-xs">
             <span><kbd className="text-[#555]">SPACE</kbd> / <kbd className="text-[#555]">↑</kbd> Jump · hold to float</span>
             <span><kbd className="text-[#555]">→</kbd> Accelerate</span>
@@ -142,6 +321,13 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
             result={runResult}
             era={{ name: era.name, token: era.token, accentColor: era.accentColor }}
             onPlayAgain={handlePlayAgain}
+            waveEarned={waveEarned}
+            onchainTxid={onchainTxid}
+            runId={activeRunId.current}
+            runIdHex={activeRunId.current
+              ? Array.from(activeRunId.current).map((b) => b.toString(16).padStart(2, '0')).join('')
+              : null}
+            eraId={eraId}
           />
         )}
       </AnimatePresence>

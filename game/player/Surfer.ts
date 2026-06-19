@@ -44,6 +44,7 @@ export class Surfer {
   }
 
   create(x: number, y: number) {
+    if (!this.scene?.add) return; // stale scene guard — scene destroyed before create() ran
     this.graphics       = this.scene.add.graphics();
     this.groundContacts = 0;
     this.isWipedOut     = false;
