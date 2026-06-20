@@ -1,52 +1,44 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { useStacksWallet, useSbtcContext } from '@baoku26/sbtc-sdk';
 import { Cl } from '@stacks/transactions';
+import { useWallet } from '@/contexts/WalletContext';
+import { callContract } from '@/lib/contract-call';
 import { getContracts } from '@/lib/contracts';
-import { useSignTx } from '@/hooks/useSignTx';
-import { callContract } from '@/lib/stacks-call';
 
-interface UseStartRunResult {
-  startRun: (tokenId: string, eraId: string) => Promise<{ txid: string; runId: Uint8Array } | null>;
-  isLoading: boolean;
-  error: string | null;
-  runId: Uint8Array | null;
+export interface UseStartRunResult {
+  /** Waits only for wallet approval, resolves immediately with a promise for the run-id */
+  startRun:     (tokenId: string, eraId: string) => Promise<{ txid: string; runIdPromise: Promise<Uint8Array> } | null>;
+  isLoading:    boolean;
+  error:        string | null;
 }
 
-// Poll the Hiro API until a tx confirms, then extract the run-id from tx_result.
-async function waitForRunId(
-  txid: string,
-  hiroApiUrl: string,
-  timeoutMs = 90_000,
-): Promise<Uint8Array> {
+// Poll /api/stacks/tx until confirmed, then extract run-id from tx_result.hex.
+// start-run returns (ok (buff 32)): 07=ok 02=buff 00000020=len <32 bytes>
+async function waitForRunId(txid: string, timeoutMs = 120_000): Promise<Uint8Array> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const res = await fetch(`${hiroApiUrl}/extended/v1/tx/${txid}`);
+    const res = await fetch(`/api/stacks/tx?txid=${encodeURIComponent(txid)}`);
     if (res.ok) {
       const tx = await res.json() as {
         tx_status: string;
         tx_result?: { hex?: string };
       };
       if (tx.tx_status === 'success') {
-        // start-run returns (ok (buff 32)).
-        // Clarity hex encoding: 07=ok 02=buff 00000020=len(32) <32 bytes>
-        // tx_result.hex may include a leading "0x".
         const raw = tx.tx_result?.hex ?? '';
         const hex = raw.startsWith('0x') ? raw.slice(2) : raw;
-        // Expect: 07(ok) 02(buff) 00000020(len) + 64 hex chars = 76 chars minimum
         if (hex.length >= 76 && hex.startsWith('0702')) {
-          return hexToBytes(hex.slice(12, 76)); // skip 07 02 00000020, take 32 bytes
+          return hexToBytes(hex.slice(12, 76));
         }
         throw new Error(`Unexpected tx_result format: ${hex.slice(0, 20)}…`);
       }
       if (tx.tx_status === 'abort_by_response' || tx.tx_status === 'abort_by_post_condition') {
-        throw new Error(`tx aborted: ${tx.tx_status}`);
+        throw new Error(`Transaction aborted: ${tx.tx_status}`);
       }
     }
-    await new Promise<void>((r) => setTimeout(r, 4000));
+    await new Promise<void>((r) => setTimeout(r, 5_000));
   }
-  throw new Error('start-run tx confirmation timed out');
+  throw new Error('start-run confirmation timed out');
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -56,18 +48,15 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 export function useStartRun(): UseStartRunResult {
-  const { address, publicKey } = useStacksWallet();
-  const { apiConfig } = useSbtcContext();
+  const { address, isConnected } = useWallet();
   const contracts = getContracts();
-  const signTx = useSignTx();
 
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [runId, setRunId] = useState<Uint8Array | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
   const abortRef = useRef(false);
 
   const startRun = useCallback(async (tokenId: string, eraId: string) => {
-    if (!address || !publicKey) {
+    if (!isConnected || !address) {
       setError('Wallet not connected');
       return null;
     }
@@ -76,33 +65,29 @@ export function useStartRun(): UseStartRunResult {
     abortRef.current = false;
 
     try {
-      const tokenIdLower = tokenId.toLowerCase();
+      // Wait only for wallet approval — typically 1-5s
       const txid = await callContract(
         contracts.waveGame,
         'start-run',
         [
-          Cl.stringAscii(tokenIdLower as Parameters<typeof Cl.stringAscii>[0]),
-          Cl.stringAscii(eraId       as Parameters<typeof Cl.stringAscii>[0]),
+          Cl.stringAscii(tokenId.toLowerCase() as Parameters<typeof Cl.stringAscii>[0]),
+          Cl.stringAscii(eraId                 as Parameters<typeof Cl.stringAscii>[0]),
         ],
-        { address, publicKey },
-        signTx,
       );
-      if (!txid) throw new Error('Transaction failed to broadcast');
 
       if (abortRef.current) return null;
 
-      const id = await waitForRunId(txid, apiConfig.hiroApiUrl);
-      if (abortRef.current) return null;
+      // Resolve run-id in the background — game starts now, run-id is ready by end of run
+      const runIdPromise = waitForRunId(txid);
 
-      setRunId(id);
-      return { txid, runId: id };
+      return { txid, runIdPromise };
     } catch (e) {
       if (!abortRef.current) setError(e instanceof Error ? e.message : 'start-run failed');
       return null;
     } finally {
       if (!abortRef.current) setIsLoading(false);
     }
-  }, [address, publicKey, contracts.waveGame, signTx, apiConfig.hiroApiUrl]);
+  }, [isConnected, address, contracts.waveGame]);
 
-  return { startRun, isLoading, error, runId };
+  return { startRun, isLoading, error };
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 
 export interface PlayerNft {
   tokenId:  number;
@@ -44,7 +44,7 @@ function save(address: string, nfts: PlayerNft[]) {
 }
 
 export function usePlayerRuns(): UsePlayerRunsResult {
-  const { address } = useStacksWallet();
+  const { address } = useWallet();
   const [nfts, setNfts]           = useState<PlayerNft[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 

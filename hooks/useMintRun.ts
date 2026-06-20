@@ -1,11 +1,10 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { useStacksContract, useStacksWallet } from '@baoku26/sbtc-sdk';
-import { Cl } from '@stacks/transactions';
+import { Cl, deserializeCV, ClarityType } from '@stacks/transactions';
+import { useWallet } from '@/contexts/WalletContext';
+import { callContract } from '@/lib/contract-call';
 import { getContracts } from '@/lib/contracts';
-import { useSignTx } from '@/hooks/useSignTx';
-import { callContract } from '@/lib/stacks-call';
 import type { TrickEvent } from '@/game/index';
 import type { PlayerNft } from '@/hooks/usePlayerRuns';
 
@@ -33,20 +32,40 @@ interface UseMintRunResult {
   reset:  () => void;
 }
 
+async function fetchLastTokenId(contract: string, sender: string): Promise<number> {
+  const res = await fetch('/api/stacks/call-read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contract,
+      fn:     'get-last-token-id',
+      sender,
+      args:   [],
+    }),
+  });
+  if (!res.ok) return 0;
+  const { okay, result } = await res.json() as { okay?: boolean; result?: string };
+  if (!okay || !result) return 0;
+  try {
+    const cv = deserializeCV(result.startsWith('0x') ? result.slice(2) : result);
+    // Returns (ok (some uint))
+    if (cv.type === ClarityType.ResponseOk) {
+      const inner = cv.value;
+      if (inner.type === ClarityType.OptionalSome && inner.value.type === ClarityType.UInt) {
+        return Number(inner.value.value as bigint);
+      }
+    }
+  } catch {}
+  return 0;
+}
+
 export function useMintRun(): UseMintRunResult {
-  const { address, publicKey } = useStacksWallet();
+  const { address, isConnected } = useWallet();
   const contracts = getContracts();
-  const signTx = useSignTx();
 
   const [phase,  setPhase]  = useState<MintPhase>('idle');
   const [error,  setError]  = useState<string | null>(null);
   const [result, setResult] = useState<MintResult | null>(null);
-
-  // Read last-token-id after mint to identify the minted NFT
-  const { refetch: refetchLastId, data: lastTokenIdData } = useStacksContract<bigint>({
-    contract: contracts.waveNft,
-    readOnly: { fn: 'get-last-token-id' },
-  });
 
   const mintRun = useCallback(async (
     runId:    Uint8Array,
@@ -57,7 +76,7 @@ export function useMintRun(): UseMintRunResult {
     survived: boolean,
     onSave:   (nft: PlayerNft) => void,
   ): Promise<MintResult | null> => {
-    if (!address || !publicKey) { setError('Wallet not connected'); return null; }
+    if (!isConnected || !address) { setError('Wallet not connected'); return null; }
 
     setPhase('image');
     setError(null);
@@ -78,31 +97,28 @@ export function useMintRun(): UseMintRunResult {
 
       setPhase('minting');
 
-      // Step 2: Mint on-chain via server-side proxy (avoids browser timeout)
+      // Step 2: Open wallet for mint-nft approval
       const tokenUri = `ipfs://${ipfsCid}`;
-      const txid = await callContract(
-        contracts.waveNft,
+      await callContract(
+        contracts.waveGame,
         'mint-nft',
         [
           Cl.buffer(runId),
           Cl.stringAscii(ipfsCid  as Parameters<typeof Cl.stringAscii>[0]),
           Cl.stringAscii(tokenUri as Parameters<typeof Cl.stringAscii>[0]),
         ],
-        { address, publicKey },
-        signTx,
       );
 
-      // Step 3: Determine token ID
-      await new Promise<void>((r) => setTimeout(r, 4000));
-      refetchLastId();
-      await new Promise<void>((r) => setTimeout(r, 1000));
-      const tokenId = lastTokenIdData !== null && lastTokenIdData !== undefined
-        ? Number(lastTokenIdData)
-        : 0;
+      // Step 3: Fetch the new token ID after a brief delay for indexer propagation
+      await new Promise<void>((r) => setTimeout(r, 5_000));
+      const tokenId = await fetchLastTokenId(contracts.waveNft, address);
 
       const mintResult: MintResult = { ipfsCid, imageUrl, tokenId };
       setResult(mintResult);
       setPhase('done');
+
+      // Fire-and-forget: increment NFT counter
+      fetch('/api/stats/increment?key=nfts', { method: 'POST' }).catch(() => {});
 
       onSave({
         tokenId,
@@ -122,7 +138,7 @@ export function useMintRun(): UseMintRunResult {
       setPhase('idle');
       return null;
     }
-  }, [address, publicKey, contracts.waveNft, signTx, refetchLastId, lastTokenIdData]);
+  }, [isConnected, address, contracts.waveGame, contracts.waveNft]);
 
   const reset = useCallback(() => {
     setPhase('idle');

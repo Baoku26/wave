@@ -2,27 +2,17 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { useWaveBalance } from '@/hooks/useWaveBalance';
 import { useFaucet } from '@/hooks/useFaucet';
 import { Header } from '@/components/layout/Header';
 
-type WalletSetupView = 'choice' | 'import' | 'backup';
-
 export default function FaucetPage() {
-  const { address, isLoaded, generateWallet, restoreWallet, exportMnemonic } = useStacksWallet();
-  const { raw: balance, display: balanceDisplay, refetch: refetchBalance } = useWaveBalance();
+  const { address, isLoaded, connect } = useWallet();
+  const { display: balanceDisplay, refetch: refetchBalance } = useWaveBalance();
   const { claim, isLoading, callError, blockError, canClaim, blocksUntilClaim, currentBlock } = useFaucet();
 
   const [txid, setTxid] = useState<string | null>(null);
-  const [genLoading, setGenLoading] = useState(false);
-  const [setupView, setSetupView] = useState<WalletSetupView>('choice');
-  const [mnemonic, setMnemonic] = useState('');
-  const [importErr, setImportErr] = useState<string | null>(null);
-  const [importLoading, setImportLoading] = useState(false);
-  const [backupPhrase, setBackupPhrase] = useState<string | null>(null);
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   async function handleClaim() {
     setTxid(null);
@@ -30,66 +20,17 @@ export default function FaucetPage() {
       const id = await claim();
       if (id) {
         setTxid(id);
-        // Poll balance every 8s for up to 90s — TX confirms after 1–2 blocks (~10–30s testnet)
-        const interval = setInterval(() => refetchBalance(), 8_000);
-        setTimeout(() => clearInterval(interval), 90_000);
+        // Poll balance every 8s for up to 90s (~1–2 testnet blocks)
+        const iv = setInterval(() => refetchBalance(), 8_000);
+        setTimeout(() => clearInterval(iv), 90_000);
       }
     } catch {
-      // errors surface via useFaucet's error state
+      // errors surface via useFaucet's callError state
     }
   }
 
-  async function handleGenerate() {
-    setGenLoading(true);
-    try {
-      await generateWallet();
-    } catch {
-      // user cancelled passphrase prompt — safe to ignore
-    } finally {
-      setGenLoading(false);
-    }
-  }
-
-  async function handleImport() {
-    const words = mnemonic.trim().split(/\s+/);
-    if (words.length !== 12 && words.length !== 24) {
-      setImportErr('Recovery phrase must be 12 or 24 words');
-      return;
-    }
-    setImportErr(null);
-    setImportLoading(true);
-    try {
-      await restoreWallet(mnemonic.trim());
-    } catch (e) {
-      setImportErr(e instanceof Error ? e.message : 'Invalid recovery phrase');
-    } finally {
-      setImportLoading(false);
-    }
-  }
-
-  async function handleBackup() {
-    setBackupLoading(true);
-    try {
-      const phrase = await exportMnemonic();
-      setBackupPhrase(phrase ?? null);
-      setSetupView('backup');
-    } catch {
-      // user cancelled passphrase prompt — safe to ignore
-    } finally {
-      setBackupLoading(false);
-    }
-  }
-
-  function handleCopy() {
-    if (!backupPhrase) return;
-    navigator.clipboard.writeText(backupPhrase).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  const noWallet = isLoaded && !address;
-  const loading = !isLoaded;
+  const noWallet  = isLoaded && !address;
+  const loading   = !isLoaded;
 
   return (
     <>
@@ -97,14 +38,13 @@ export default function FaucetPage() {
       <main className="min-h-screen bg-[#0a0a0a] text-[#fafafa]">
         <div className="max-w-sm mx-auto px-4 py-16 flex flex-col gap-8">
 
-          {/* Page title */}
           <div>
             <h1 className="text-xl font-semibold text-[#fafafa]">
-              {noWallet ? 'Get started' : 'WAVE Faucet'}
+              {noWallet ? 'Connect to play' : 'WAVE Faucet'}
             </h1>
             <p className="text-[#444] text-xs mt-1">
               {noWallet
-                ? 'Create or import a wallet to play on testnet'
+                ? 'Connect Leather or Xverse to claim WAVE tokens'
                 : 'Claim 500 WAVE every 144 blocks (~24h)'}
             </p>
           </div>
@@ -124,115 +64,33 @@ export default function FaucetPage() {
               </motion.div>
             )}
 
-            {/* No wallet — setup flow */}
+            {/* Not connected */}
             {!loading && noWallet && (
               <motion.div
-                key="setup"
+                key="no-wallet"
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                 className="bg-[#111] border border-[#1e1e1e] rounded-2xl p-6 flex flex-col gap-5"
               >
-                {setupView === 'choice' && (
-                  <>
-                    <p className="text-[#555] text-sm leading-relaxed">
-                      WAVE uses an in-browser wallet. No extension required.
-                    </p>
-                    <div className="flex flex-col gap-3">
-                      <button
-                        onClick={handleGenerate}
-                        disabled={genLoading}
-                        className="w-full py-3 rounded-xl text-sm font-semibold bg-[#f7931a] text-[#0a0a0a] hover:bg-[#e8841a] transition-colors disabled:opacity-60"
-                      >
-                        {genLoading ? 'Creating wallet…' : 'Generate new wallet'}
-                      </button>
-                      <button
-                        onClick={() => setSetupView('import')}
-                        className="w-full py-3 rounded-xl text-sm font-medium border border-[#2a2a2a] text-[#888] hover:border-[#3a3a3a] hover:text-[#aaa] transition-colors"
-                      >
-                        Import existing wallet
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {setupView === 'import' && (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => { setSetupView('choice'); setImportErr(null); setMnemonic(''); }}
-                        className="text-[#444] hover:text-[#666] text-xs transition-colors"
-                      >
-                        ← back
-                      </button>
-                      <p className="text-[#888] text-sm font-medium">Import wallet</p>
-                    </div>
-
-                    <div className="flex flex-col gap-3">
-                      <textarea
-                        value={mnemonic}
-                        onChange={(e) => { setMnemonic(e.target.value); setImportErr(null); }}
-                        placeholder="Enter your 12 or 24-word recovery phrase…"
-                        rows={4}
-                        className="w-full bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-[#fafafa] text-sm placeholder-[#333] resize-none focus:outline-none focus:border-[#3a3a3a]"
-                      />
-                      {importErr && (
-                        <p className="text-[#ef4444] text-xs">{importErr}</p>
-                      )}
-                      <button
-                        onClick={handleImport}
-                        disabled={!mnemonic.trim() || importLoading}
-                        className="w-full py-3 rounded-xl text-sm font-semibold bg-[#f7931a] text-[#0a0a0a] hover:bg-[#e8841a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {importLoading ? 'Importing…' : 'Import wallet'}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </motion.div>
-            )}
-
-            {/* Backup phrase view */}
-            {!loading && !noWallet && setupView === 'backup' && backupPhrase && (
-              <motion.div
-                key="backup"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                className="flex flex-col gap-5"
-              >
-                <div className="bg-[#0f1a0f] border border-[#1e3a1e] rounded-xl px-4 py-3">
-                  <p className="text-[#4ade80] text-xs font-medium mb-1">Keep this safe</p>
-                  <p className="text-[#2d5c2d] text-xs leading-relaxed">
-                    This is the only way to recover your wallet. Never share it.
-                  </p>
-                </div>
-                <div className="bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl p-4">
-                  <p className="text-[#888] text-sm font-mono leading-loose break-all select-all">
-                    {backupPhrase}
-                  </p>
-                </div>
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleCopy}
-                    className="flex-1 py-2.5 rounded-xl text-xs font-medium border border-[#2a2a2a] text-[#888] hover:border-[#3a3a3a] hover:text-[#aaa] transition-colors"
-                  >
-                    {copied ? 'Copied!' : 'Copy phrase'}
-                  </button>
-                  <button
-                    onClick={() => { setSetupView('choice'); setBackupPhrase(null); }}
-                    className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-[#1a1a1a] text-[#fafafa] hover:bg-[#222] transition-colors"
-                  >
-                    Done
-                  </button>
-                </div>
+                <p className="text-[#555] text-sm leading-relaxed">
+                  WAVE runs on Stacks testnet. Install{' '}
+                  <span className="text-[#888]">Leather</span> or{' '}
+                  <span className="text-[#888]">Xverse</span> to get a testnet wallet, then
+                  connect below.
+                </p>
+                <button
+                  onClick={connect}
+                  className="w-full py-3 rounded-xl text-sm font-semibold bg-[#f7931a] text-[#0a0a0a] hover:bg-[#e8841a] transition-colors"
+                >
+                  Connect Wallet
+                </button>
               </motion.div>
             )}
 
             {/* Connected — faucet */}
-            {!loading && !noWallet && setupView !== 'backup' && (
+            {!loading && !noWallet && (
               <motion.div
                 key="connected"
                 initial={{ opacity: 0, y: 12 }}
@@ -270,11 +128,11 @@ export default function FaucetPage() {
                     className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{
                       background: canClaim ? '#f7931a' : '#1e1e1e',
-                      color: canClaim ? '#0a0a0a' : '#444',
+                      color:      canClaim ? '#0a0a0a' : '#444',
                     }}
                   >
                     {isLoading
-                      ? 'Claiming…'
+                      ? 'Approve in wallet…'
                       : canClaim
                       ? 'Claim 500 WAVE'
                       : `${blocksUntilClaim} blocks until next claim`}
@@ -286,7 +144,7 @@ export default function FaucetPage() {
                       animate={{ opacity: 1 }}
                       className="text-[#444] text-xs text-center"
                     >
-                      Confirming on Stacks (~10s per block)…
+                      Waiting for confirmation (~10s per block)…
                     </motion.p>
                   )}
 
@@ -324,21 +182,10 @@ export default function FaucetPage() {
                   )}
                 </div>
 
-                {/* Wallet info + actions */}
-                <div className="flex flex-col gap-2">
-                  <p className="text-[#2a2a2a] text-[10px] font-mono text-center break-all">
-                    {address}
-                  </p>
-                  <div className="flex gap-2 justify-center">
-                    <button
-                      onClick={handleBackup}
-                      disabled={backupLoading}
-                      className="text-[#333] hover:text-[#555] text-xs transition-colors underline underline-offset-2"
-                    >
-                      {backupLoading ? 'Unlocking…' : 'Backup recovery phrase'}
-                    </button>
-                  </div>
-                </div>
+                {/* Address */}
+                <p className="text-[#2a2a2a] text-[10px] font-mono text-center break-all">
+                  {address}
+                </p>
               </motion.div>
             )}
 

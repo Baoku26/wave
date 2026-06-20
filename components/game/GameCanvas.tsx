@@ -28,12 +28,26 @@ export function GameCanvas({
   const cleanupRef = useRef<(() => void) | null>(null);
   const [isReady, setIsReady] = useState(false);
 
+  // Keep refs to latest callbacks so EventBus listeners never go stale.
+  // The effect below registers stable wrappers (once) that always call the current ref.
+  const onRunCompleteRef  = useRef(onRunComplete);
+  const onScoreUpdateRef  = useRef(onScoreUpdate);
+  const onTrickLandedRef  = useRef(onTrickLanded);
+  useEffect(() => { onRunCompleteRef.current  = onRunComplete;  }, [onRunComplete]);
+  useEffect(() => { onScoreUpdateRef.current  = onScoreUpdate;  }, [onScoreUpdate]);
+  useEffect(() => { onTrickLandedRef.current  = onTrickLanded;  }, [onTrickLanded]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!containerRef.current) return;
     if (gameRef.current) return;
 
     let mounted = true;
+
+    // Stable wrappers — registered once, always call the latest prop via ref.
+    const stableRunComplete  = (r: RunCompletePayload) => onRunCompleteRef.current(r);
+    const stableScoreUpdate  = (u: ScoreUpdatePayload) => onScoreUpdateRef.current?.(u);
+    const stableTrickLanded  = (t: TrickEvent)         => onTrickLandedRef.current?.(t);
 
     import('@/game/index').then(({ createGame }) => {
       if (!mounted || !containerRef.current) return;
@@ -55,15 +69,15 @@ export function GameCanvas({
       };
       EventBus.once('game-scene-ready', onGameSceneReady);
 
-      EventBus.on('run-complete', onRunComplete);
-      if (onScoreUpdate) EventBus.on('score-update', onScoreUpdate);
-      if (onTrickLanded) EventBus.on('trick-landed', onTrickLanded);
+      EventBus.on('run-complete', stableRunComplete);
+      EventBus.on('score-update', stableScoreUpdate);
+      EventBus.on('trick-landed', stableTrickLanded);
 
       cleanupRef.current = () => {
         EventBus.off('game-scene-ready', onGameSceneReady);
-        EventBus.off('run-complete', onRunComplete);
-        if (onScoreUpdate) EventBus.off('score-update', onScoreUpdate);
-        if (onTrickLanded) EventBus.off('trick-landed', onTrickLanded);
+        EventBus.off('run-complete', stableRunComplete);
+        EventBus.off('score-update', stableScoreUpdate);
+        EventBus.off('trick-landed', stableTrickLanded);
       };
     });
 

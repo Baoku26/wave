@@ -20,6 +20,13 @@ function hiroBase() {
     : 'https://api.testnet.hiro.so';
 }
 
+function hiroHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
+  const apiKey = process.env.HIRO_API_KEY;
+  if (apiKey) headers['x-api-key'] = apiKey;
+  return headers;
+}
+
 // In this version of @stacks/transactions, serializeCV returns a hex string.
 function cvHex(cv: Parameters<typeof serializeCV>[0]): string {
   return '0x' + serializeCV(cv);
@@ -46,7 +53,7 @@ async function fetchFromChain(eraId: string): Promise<LeaderboardEntry[]> {
       `${hiroBase()}/v2/contracts/call-read/${principal}/${contractName}/get-leaderboard`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: hiroHeaders(),
         body: JSON.stringify({
           sender: principal,
           arguments: [

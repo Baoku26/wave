@@ -1,27 +1,28 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
+import { signMessage } from '@/lib/contract-call';
 
 export interface Profile {
   wallet_address: string;
-  display_name: string | null;
-  avatar_url: string | null;
+  display_name:   string | null;
+  avatar_url:     string | null;
 }
 
 interface UseProfileResult {
-  profile: Profile | null;
-  isLoading: boolean;
-  error: string | null;
+  profile:       Profile | null;
+  isLoading:     boolean;
+  error:         string | null;
   updateProfile: (displayName: string, avatarUrl?: string) => Promise<boolean>;
 }
 
 export function useProfile(): UseProfileResult {
-  const { address, exportMnemonic } = useStacksWallet();
+  const { address, isConnected } = useWallet();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile,   setProfile]   = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
 
   useEffect(() => {
     if (!address) { setProfile(null); return; }
@@ -34,33 +35,19 @@ export function useProfile(): UseProfileResult {
   }, [address]);
 
   const updateProfile = useCallback(async (displayName: string, avatarUrl = '') => {
-    if (!address) return false;
+    if (!isConnected || !address) { setError('Wallet not connected'); return false; }
+
+    setIsLoading(true);
+    setError(null);
+
     try {
-      setIsLoading(true);
-      setError(null);
-
-      const mnemonic = await exportMnemonic();
       const message = `wave-profile:${address}:${displayName}`;
-      const msgBytes = new TextEncoder().encode(message);
-      const hashBuf = new ArrayBuffer(msgBytes.length);
-      new Uint8Array(hashBuf).set(msgBytes);
-      const hashDigest = await crypto.subtle.digest('SHA-256', hashBuf);
-      const msgHashHex = Array.from(new Uint8Array(hashDigest))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
-
-      const { generateWallet } = await import('@stacks/wallet-sdk');
-      const { signMessageHashRsv } = await import('@stacks/transactions');
-      const wallet = await generateWallet({ secretKey: mnemonic, password: '' });
-      const sigHex = signMessageHashRsv({
-        messageHash: msgHashHex,
-        privateKey: wallet.accounts[0].stxPrivateKey,
-      });
+      const { signature, publicKey } = await signMessage(message);
 
       const res = await fetch('/api/profile', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: address, display_name: displayName, avatar_url: avatarUrl, signature: sigHex }),
+        body:    JSON.stringify({ wallet: address, display_name: displayName, avatar_url: avatarUrl, signature, publicKey }),
       });
 
       if (!res.ok) { setError('Profile update failed'); return false; }
@@ -73,7 +60,7 @@ export function useProfile(): UseProfileResult {
     } finally {
       setIsLoading(false);
     }
-  }, [address, exportMnemonic]);
+  }, [isConnected, address]);
 
   return { profile, isLoading, error, updateProfile };
 }

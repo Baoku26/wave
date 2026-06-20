@@ -3,13 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { useProfile } from '@/hooks/useProfile';
 import { useWaveBalance } from '@/hooks/useWaveBalance';
 import { Header } from '@/components/layout/Header';
 
 export default function ProfilePage() {
-  const { address, isLoaded, lockWallet, clearWallet } = useStacksWallet();
+  const { address, isLoaded, connect, disconnect } = useWallet();
   const { profile, isLoading, error, updateProfile } = useProfile();
   const { display: balanceDisplay } = useWaveBalance();
 
@@ -18,7 +18,6 @@ export default function ProfilePage() {
   const [saved, setSaved]             = useState(false);
   const [saving, setSaving]           = useState(false);
   const [saveErr, setSaveErr]         = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
 
   // Populate form from loaded profile
   useEffect(() => {
@@ -71,14 +70,14 @@ export default function ProfilePage() {
                 className="bg-[#111] border border-[#1e1e1e] rounded-2xl p-6 text-center flex flex-col gap-4"
               >
                 <p className="text-[#555] text-sm leading-relaxed">
-                  No wallet connected. Get started to create or import one.
+                  Connect your Leather or Xverse wallet to set up your profile.
                 </p>
-                <Link
-                  href="/faucet"
-                  className="w-full py-3 rounded-xl text-sm font-semibold bg-[#f7931a] text-[#0a0a0a] hover:bg-[#e8841a] transition-colors block text-center"
+                <button
+                  onClick={connect}
+                  className="w-full py-3 rounded-xl text-sm font-semibold bg-[#f7931a] text-[#0a0a0a] hover:bg-[#e8841a] transition-colors"
                 >
-                  Get started
-                </Link>
+                  Connect Wallet
+                </button>
               </motion.div>
             )}
 
@@ -116,21 +115,12 @@ export default function ProfilePage() {
                     )}
                   </div>
                   <p className="text-[#666] text-[11px] font-mono break-all">{address}</p>
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      onClick={() => lockWallet()}
-                      className="text-[#333] hover:text-[#555] text-xs transition-colors"
-                    >
-                      Lock wallet
-                    </button>
-                    <span className="text-[#222] text-xs">·</span>
-                    <Link
-                      href="/faucet"
-                      className="text-[#333] hover:text-[#555] text-xs transition-colors"
-                    >
-                      Backup phrase
-                    </Link>
-                  </div>
+                  <button
+                    onClick={disconnect}
+                    className="text-[#333] hover:text-[#555] text-xs transition-colors text-left pt-1"
+                  >
+                    Disconnect
+                  </button>
                 </div>
 
                 {/* Profile form */}
@@ -200,38 +190,6 @@ export default function ProfilePage() {
                   </form>
                 )}
 
-                {/* Danger zone */}
-                <div className="border border-[#1e1e1e] rounded-2xl p-5 flex flex-col gap-3">
-                  <p className="text-[#444] text-xs font-medium">Danger zone</p>
-                  {!confirmClear ? (
-                    <button
-                      onClick={() => setConfirmClear(true)}
-                      className="text-[#ef4444]/60 hover:text-[#ef4444] text-xs transition-colors text-left"
-                    >
-                      Remove wallet from this browser
-                    </button>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <p className="text-[#ef4444]/80 text-xs leading-relaxed">
-                        This removes your wallet from this browser. Back up your recovery phrase first — it cannot be recovered.
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setConfirmClear(false)}
-                          className="flex-1 py-2 rounded-lg text-xs border border-[#2a2a2a] text-[#555] hover:text-[#888] transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={() => clearWallet()}
-                          className="flex-1 py-2 rounded-lg text-xs bg-[#ef4444]/10 border border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/20 transition-colors font-medium"
-                        >
-                          Remove wallet
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
 
               </motion.div>
             )}

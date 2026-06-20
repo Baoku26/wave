@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useWaveBalance } from '@/hooks/useWaveBalance';
 import { useMintRun, type MintPhase } from '@/hooks/useMintRun';
 import { usePlayerRuns } from '@/hooks/usePlayerRuns';
 import type { RunCompletePayload, TrickEvent } from '@/game/index';
@@ -15,14 +14,15 @@ interface Era {
 }
 
 interface PostRunScreenProps {
-  result:        RunCompletePayload;
-  era:           Era;
-  onPlayAgain:   () => void;
-  waveEarned?:   bigint | null;
-  onchainTxid?:  string | null;
-  runId?:        Uint8Array | null;
-  runIdHex?:     string | null;
-  eraId?:        string;
+  result:           RunCompletePayload;
+  era:              Era;
+  onPlayAgain:      () => void;
+  waveEarned?:     bigint | null;
+  onchainTxid?:    string | null;
+  runId?:          Uint8Array | null;
+  runIdHex?:       string | null;
+  eraId?:          string;
+  waveBalanceRaw?: bigint | null;
 }
 
 const TIERS = [
@@ -81,7 +81,7 @@ const MINT_PHASE_LABEL: Record<MintPhase, string | null> = {
   done:    null,
 };
 
-const MINT_COST = BigInt(100);
+const MINT_COST = BigInt(100_000_000); // 100 WAVE with 6 decimals
 
 export function PostRunScreen({
   result,
@@ -92,11 +92,11 @@ export function PostRunScreen({
   runId,
   runIdHex,
   eraId,
+  waveBalanceRaw,
 }: PostRunScreenProps) {
   const displayScore = useCountUp(result.score);
   const tier         = getTier(result.score);
 
-  const { raw: waveBalance } = useWaveBalance();
   const { mintRun, phase: mintPhase, error: mintError, result: mintResult } = useMintRun();
   const { addNft } = usePlayerRuns();
 
@@ -105,9 +105,9 @@ export function PostRunScreen({
     runId &&
     runIdHex &&
     eraId &&
-    waveEarned != null &&   // score was submitted on-chain
+    waveEarned != null &&
     result.survived &&
-    waveBalance !== null && waveBalance >= MINT_COST &&
+    waveBalanceRaw != null && waveBalanceRaw >= MINT_COST &&
     mintPhase === 'idle',
   );
 

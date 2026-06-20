@@ -3,7 +3,7 @@
 import { use, useMemo } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { usePlayerRuns } from '@/hooks/usePlayerRuns';
 import { ERAS, type EraId } from '@/lib/eras';
 
@@ -23,7 +23,7 @@ export default function NftDetailPage({ params }: { params: Promise<{ 'token-id'
   const { 'token-id': rawTokenId } = use(params);
   const tokenId = parseInt(rawTokenId, 10);
 
-  const { address, isLoaded } = useStacksWallet();
+  const { address, isLoaded } = useWallet();
   const { nfts, isLoading }   = usePlayerRuns();
 
   const nft = useMemo(

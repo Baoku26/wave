@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { useLeaderboard, type LeaderboardEntry } from '@/hooks/useLeaderboard';
 import { ERA_LIST, ERAS, type EraId } from '@/lib/eras';
 import { Header } from '@/components/layout/Header';
@@ -171,7 +171,7 @@ function EraLeaderboard({ eraId, address }: { eraId: string; address: string | u
 
 export default function LeaderboardPage() {
   const [activeEra, setActiveEra] = useState<string>(ERA_LIST[0].id);
-  const { address }               = useStacksWallet();
+  const { address }               = useWallet();
   const era = ERAS[activeEra as EraId];
 
   return (

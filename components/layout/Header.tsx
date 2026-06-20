@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { useWaveBalance } from '@/hooks/useWaveBalance';
 
 const NAV = [
@@ -14,8 +14,8 @@ const NAV = [
 
 export function Header() {
   const pathname = usePathname();
-  const { address, isLoaded } = useStacksWallet();
-  const { raw: waveBalance }  = useWaveBalance();
+  const { address, isConnected, isLoaded, connect, disconnect } = useWallet();
+  const { display: waveDisplay } = useWaveBalance();
 
   return (
     <header className="sticky top-0 z-40 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-[#1a1a1a]">
@@ -46,30 +46,36 @@ export function Header() {
           })}
         </nav>
 
-        {/* Wallet status */}
+        {/* Wallet */}
         <div className="flex items-center gap-3 shrink-0">
-          {isLoaded && address ? (
+          {!isLoaded ? null : isConnected && address ? (
             <>
-              {waveBalance !== null && (
+              {waveDisplay !== null && (
                 <span className="text-[#f7931a] text-xs tabular-nums font-medium hidden sm:block">
-                  {waveBalance.toLocaleString()} WAVE
+                  {waveDisplay} WAVE
                 </span>
               )}
               <Link
                 href="/profile"
-                className="text-[#2a2a2a] text-[10px] font-mono hidden md:block hover:text-[#444] transition-colors"
+                className="text-[#555] text-[10px] font-mono hidden md:block hover:text-[#888] transition-colors"
               >
                 {address.slice(0, 6)}…{address.slice(-4)}
               </Link>
+              <button
+                onClick={disconnect}
+                className="text-xs px-2 py-1 rounded border border-[#2a2a2a] text-[#444] hover:border-[#444] hover:text-[#777] transition-colors"
+              >
+                Disconnect
+              </button>
             </>
-          ) : isLoaded ? (
-            <Link
-              href="/faucet"
-              className="text-xs px-3 py-1.5 rounded-lg border border-[#2a2a2a] text-[#555] hover:border-[#3a3a3a] hover:text-[#888] transition-colors"
+          ) : (
+            <button
+              onClick={connect}
+              className="text-xs px-3 py-1.5 rounded-lg bg-[#f7931a] text-black font-semibold hover:bg-[#e8841a] transition-colors"
             >
-              Get started
-            </Link>
-          ) : null}
+              Connect Wallet
+            </button>
+          )}
         </div>
 
       </div>

@@ -16,7 +16,6 @@
 (define-constant ERR_INSUFFICIENT_WAVE (err u200))
 (define-constant ERR_INVALID_ERA       (err u201))
 (define-constant ERR_RUN_NOT_FOUND     (err u202))
-(define-constant ERR_INVALID_SIGNATURE (err u203))
 (define-constant ERR_ALREADY_MINTED    (err u204))
 (define-constant ERR_NOT_RUN_OWNER     (err u205))
 (define-constant ERR_REWARD_CLAIMED    (err u206))
@@ -157,38 +156,22 @@
     (ok run-id)))
 
 ;; --- Public: submit-score ---
+;; Authentication is implicit: run-id maps to a player principal, and the
+;; ERR_NOT_RUN_OWNER check ensures only tx-sender can submit their own run.
 
 (define-public (submit-score
-  (run-id    (buff 32))
-  (score     uint)
-  (tricks    (list 10 (string-ascii 20)))
-  (signature (buff 65)))
+  (run-id (buff 32))
+  (score  uint)
+  (tricks (list 10 (string-ascii 20))))
   (let ((run (unwrap! (map-get? runs run-id) ERR_RUN_NOT_FOUND)))
     (asserts! (is-eq (get player run) tx-sender) ERR_NOT_RUN_OWNER)
     (asserts! (not (get reward-claimed run)) ERR_REWARD_CLAIMED)
-    ;; Verify: sha256(run-id || score-buff || tricks-hash) signed by tx-sender's key
-    ;; tricks-hash = iterative sha256 fold over sorted tricks (fixed 32-byte output)
-    ;; hash160(recovered-pubkey) must equal sender's hash-bytes from principal-destruct
-    (let ((tricks-hash (fold hash-trick tricks 0x0000000000000000000000000000000000000000000000000000000000000000))
-          (msg-hash (sha256 (concat
-                      (concat run-id (unwrap-panic (to-consensus-buff? score)))
-                      tricks-hash)))
-          (sender-hash-bytes (get hash-bytes (unwrap-panic (principal-destruct? tx-sender)))))
-      (asserts!
-        (is-eq
-          (hash160 (unwrap! (secp256k1-recover? msg-hash signature) ERR_INVALID_SIGNATURE))
-          sender-hash-bytes)
-        ERR_INVALID_SIGNATURE))
     (let ((reward (score-to-reward score)))
       (map-set runs run-id (merge run { score: score, tricks: tricks, reward-claimed: true }))
       (try! (contract-call? .wave-token mint-reward reward tx-sender))
       (update-leaderboard (get token-id run) (get era-id run) tx-sender score run-id)
       (print { event: "score-submitted", run-id: run-id, player: tx-sender, score: score, reward: reward })
       (ok reward))))
-
-;; Rolling sha256 over tricks keeps the accumulator at a fixed (buff 32)
-(define-private (hash-trick (trick (string-ascii 20)) (acc (buff 32)))
-  (sha256 (concat acc (unwrap-panic (to-consensus-buff? trick)))))
 
 ;; --- Public: mint-nft ---
 

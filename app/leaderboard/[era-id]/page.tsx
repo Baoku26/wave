@@ -3,7 +3,7 @@
 import { use } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { useLeaderboard, type LeaderboardEntry } from '@/hooks/useLeaderboard';
 import { ERAS, type EraId } from '@/lib/eras';
 import { Header } from '@/components/layout/Header';
@@ -107,7 +107,7 @@ export default function EraLeaderboardPage({
   const { 'era-id': eraId } = use(params);
   const era                 = ERAS[eraId as EraId] ?? ERAS['stx-bull-2021'];
 
-  const { address }                      = useStacksWallet();
+  const { address }                      = useWallet();
   const { entries, isLoading, error, refetch } = useLeaderboard(eraId);
 
   const playerEntry = address ? entries.find((e) => e.player === address) : null;

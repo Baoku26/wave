@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { usePlayerRuns, type PlayerNft } from '@/hooks/usePlayerRuns';
 import { ERAS, type EraId } from '@/lib/eras';
 
@@ -122,7 +122,7 @@ function EmptyState({ hasWallet }: { hasWallet: boolean }) {
 }
 
 export default function GalleryPage() {
-  const { address, isLoaded } = useStacksWallet();
+  const { address, isLoaded } = useWallet();
   const { nfts, isLoading }   = usePlayerRuns();
   const hasWallet = isLoaded && !!address;
 

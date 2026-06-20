@@ -80,7 +80,6 @@ describe('wave-game', () => {
         fakeRunId,
         Cl.uint(5000),
         Cl.list([]),
-        Cl.buffer(new Uint8Array(65)),
       ], wallet1);
       expect(result).toBeErr(Cl.uint(202));
     });

@@ -3,7 +3,7 @@
 import { use, useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { GameCanvas } from '@/components/game/GameCanvas';
 import { HUD } from '@/components/game/HUD';
 import { PostRunScreen } from '@/components/game/PostRunScreen';
@@ -13,7 +13,7 @@ import { useSubmitScore } from '@/hooks/useSubmitScore';
 import type { OHLCCandle, RunCompletePayload, ScoreUpdatePayload, TrickEvent } from '@/game/index';
 import { ERAS, type EraId } from '@/lib/eras';
 
-const START_RUN_COST = BigInt(50); // WAVE tokens
+const START_RUN_COST = BigInt(50_000_000); // 50 WAVE with 6 decimals
 
 export default function GamePage({ params }: { params: Promise<{ 'era-id': string }> }) {
   const { 'era-id': rawEraId } = use(params);
@@ -21,9 +21,9 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
   const era   = ERAS[eraId] ?? ERAS['stx-bull-2021'];
 
   // ── wallet ───────────────────────────────────────────────────────────────────
-  const { address, publicKey, isLoaded } = useStacksWallet();
-  const { raw: waveBalance, refetch: refetchBalance } = useWaveBalance();
-  const { startRun, isLoading: isStarting, error: startError, runId } = useStartRun();
+  const { address, isLoaded } = useWallet();
+  const { raw: waveBalance, display: waveBalanceDisplay, refetch: refetchBalance } = useWaveBalance();
+  const { startRun, isLoading: isStarting, error: startError } = useStartRun();
   const { submitScore, isLoading: isSubmitting, error: submitError } = useSubmitScore();
 
   const hasWallet       = isLoaded && !!address;
@@ -43,7 +43,11 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
   // ── game flow ────────────────────────────────────────────────────────────────
   const [gameStarted,  setGameStarted]  = useState(false);
   const [onchainMode,  setOnchainMode]  = useState(false);
-  const activeRunId    = useRef<Uint8Array | null>(null);
+  // Promise resolves after start-run TX confirms; game starts before it resolves.
+  const activeRunId    = useRef<Promise<Uint8Array> | null>(null);
+  // Populated in handleRunComplete once the promise settles.
+  const resolvedRunId  = useRef<Uint8Array | null>(null);
+  const resolvedRunHex = useRef<string | null>(null);
 
   const [score,           setScore]           = useState(0);
   const [multiplier,      setMultiplier]      = useState(1);
@@ -71,24 +75,38 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
 
   const handleRunComplete = useCallback(async (r: RunCompletePayload) => {
     if (onchainMode && activeRunId.current) {
+      // Wait for the start-run TX to confirm (should already be done after 1-3 min of gameplay)
       setSubmitPhase('signing');
-      const result = await submitScore(activeRunId.current, r.score, r.tricks);
+      let runId: Uint8Array;
+      try {
+        runId = await activeRunId.current;
+        resolvedRunId.current  = runId;
+        resolvedRunHex.current = Array.from(runId).map((b) => b.toString(16).padStart(2, '0')).join('');
+      } catch {
+        // start-run TX failed or timed out — show results without on-chain score
+        setSubmitPhase('idle');
+        setRunResult(r);
+        return;
+      }
+      const result = await submitScore(runId, r.score, r.tricks, eraId);
       if (result) {
         setSubmitPhase('confirming');
         setOnchainTxid(result.txid);
         setWaveEarned(result.waveEarned);
+        // Wait for on-chain confirmation before showing post-run screen.
+        // This also ensures the leaderboard cache is only busted after the score lands.
+        await result.confirmationPromise;
         refetchBalance();
-        // Give the tx a moment to broadcast before showing the result screen
-        setTimeout(() => { setSubmitPhase('done'); setRunResult(r); }, 1200);
+        setSubmitPhase('done');
+        setRunResult(r);
       } else {
-        // Submission failed — still show results in demo mode
         setSubmitPhase('idle');
         setRunResult(r);
       }
     } else {
       setRunResult(r);
     }
-  }, [onchainMode, submitScore, refetchBalance]);
+  }, [onchainMode, submitScore, refetchBalance, eraId]);
 
   const handlePlayAgain = useCallback(() => window.location.reload(), []);
 
@@ -100,16 +118,18 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
   }, []);
 
   const handleStartOnchain = useCallback(async () => {
-    if (!address || !publicKey) return;
+    if (!address) return;
     setOnchainMode(true);
+    // callContract waits only for wallet approval (~1-5s), game starts immediately after
     const res = await startRun(era.token, eraId);
     if (res) {
-      activeRunId.current = res.runId;
+      // run-id resolves in background; game starts now
+      activeRunId.current = res.runIdPromise;
       setGameStarted(true);
     } else {
       setOnchainMode(false);
     }
-  }, [address, publicKey, startRun, era.token, eraId]);
+  }, [address, startRun, era.token, eraId]);
 
   // ── submit overlay text ───────────────────────────────────────────────────────
   const submitStatusText = (() => {
@@ -141,7 +161,7 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
           {hasWallet ? (
             <>
               <span className="text-[#f7931a] text-xs tabular-nums font-medium">
-                {waveBalance?.toLocaleString() ?? '—'} WAVE
+                {waveBalanceDisplay ?? '—'} WAVE
               </span>
               <span className="text-[#2a2a2a] text-[10px] font-mono hidden sm:block">
                 {address!.slice(0, 6)}…{address!.slice(-4)}
@@ -230,12 +250,12 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
                             style={{ background: era.accentColor, color: '#0a0a0a' }}
                           >
                             {isStarting
-                              ? 'Confirming on Stacks…'
+                              ? 'Approve in wallet…'
                               : `Start Run · 50 WAVE`}
                           </button>
                           {isStarting && (
                             <p className="text-[#333] text-[10px] text-center">
-                              ~10s · confirming on Bitcoin via Stacks
+                              Approve the transaction in your wallet to start
                             </p>
                           )}
                           {!hasSufficientWave && !isStarting && (
@@ -323,11 +343,10 @@ export default function GamePage({ params }: { params: Promise<{ 'era-id': strin
             onPlayAgain={handlePlayAgain}
             waveEarned={waveEarned}
             onchainTxid={onchainTxid}
-            runId={activeRunId.current}
-            runIdHex={activeRunId.current
-              ? Array.from(activeRunId.current).map((b) => b.toString(16).padStart(2, '0')).join('')
-              : null}
+            runId={resolvedRunId.current}
+            runIdHex={resolvedRunHex.current}
             eraId={eraId}
+            waveBalanceRaw={waveBalance}
           />
         )}
       </AnimatePresence>

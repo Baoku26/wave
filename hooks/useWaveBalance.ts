@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useStacksWallet } from '@baoku26/sbtc-sdk';
+import { useWallet } from '@/contexts/WalletContext';
 import { getContracts } from '@/lib/contracts';
 
 export interface UseWaveBalanceResult {
@@ -12,7 +12,7 @@ export interface UseWaveBalanceResult {
   refetch:   () => void;
 }
 
-const DECIMALS = 1_000_000; // wave-token has 6 decimals
+const DECIMALS = 1_000_000;
 
 async function fetchBalance(address: string, asset: string): Promise<bigint> {
   const res = await fetch(
@@ -27,15 +27,14 @@ async function fetchBalance(address: string, asset: string): Promise<bigint> {
 }
 
 export function useWaveBalance(): UseWaveBalanceResult {
-  const { address } = useStacksWallet();
-  const contracts = getContracts();
+  const { address } = useWallet();
+  const contracts   = getContracts();
 
   const [raw,       setRaw]       = useState<bigint | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error,     setError]     = useState<string | null>(null);
-  const mountedRef = useRef(true);
+  const mountedRef  = useRef(true);
 
-  // asset key format: <contract>::<token-name>
   const asset = `${contracts.waveToken}::wave-token`;
 
   const load = useCallback(async () => {
@@ -55,7 +54,6 @@ export function useWaveBalance(): UseWaveBalanceResult {
   useEffect(() => {
     mountedRef.current = true;
     void load();
-    // Refresh every 30s
     const id = setInterval(() => void load(), 30_000);
     return () => { mountedRef.current = false; clearInterval(id); };
   }, [load]);
